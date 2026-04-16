@@ -1,6 +1,6 @@
 -include config.mk
 
-SUBDIRS = adminctl sysadaemon tty
+SUBDIRS = adminctl sysadaemon tty networks
 
 CC ?= gcc
 CFLAGS ?= -Wall -O2
