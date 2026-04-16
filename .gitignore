@@ -1,0 +1,7 @@
+/testfs
+*.o
+*.a
+*.so
+*.so.*
+*.exe
+*.out

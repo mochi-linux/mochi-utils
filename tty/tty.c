@@ -19,6 +19,18 @@
 #define PROGRAM_NAME "tty"
 #define PROGRAM_VERSION "2.0 (Advanced PTY)"
 
+/* Globals used by the SIGWINCH handler */
+static volatile int g_master_fd  = -1;
+
+static void sigwinch_handler(int sig) {
+    (void)sig;
+    if (g_master_fd >= 0) {
+        struct winsize ws;
+        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0)
+            ioctl(g_master_fd, TIOCSWINSZ, &ws);
+    }
+}
+
 static struct option long_options[] = {
     {"silent", no_argument, 0, 's'},
     {"quiet", no_argument, 0, 's'},
@@ -84,13 +96,40 @@ static void print_help(void) {
 
 static speed_t baud_to_int(speed_t speed) {
     switch (speed) {
-        case B0: return 0;
-        case B50: return 50; case B75: return 75; case B110: return 110;
-        case B134: return 134; case B150: return 150; case B200: return 200;
-        case B300: return 300; case B600: return 600; case B1200: return 1200;
-        case B1800: return 1800; case B2400: return 2400; case B4800: return 4800;
-        case B9600: return 9600; case B19200: return 19200; case B38400: return 38400;
-        case B57600: return 57600; case B115200: return 115200; case B230400: return 230400;
+        case B0:      return 0;
+        case B50:     return 50;
+        case B75:     return 75;
+        case B110:    return 110;
+        case B134:    return 134;
+        case B150:    return 150;
+        case B200:    return 200;
+        case B300:    return 300;
+        case B600:    return 600;
+        case B1200:   return 1200;
+        case B1800:   return 1800;
+        case B2400:   return 2400;
+        case B4800:   return 4800;
+        case B9600:   return 9600;
+        case B19200:  return 19200;
+        case B38400:  return 38400;
+        case B57600:  return 57600;
+        case B115200: return 115200;
+        case B230400: return 230400;
+#ifdef B460800
+        case B460800: return 460800;
+#endif
+#ifdef B921600
+        case B921600: return 921600;
+#endif
+#ifdef B1000000
+        case B1000000: return 1000000;
+#endif
+#ifdef B1500000
+        case B1500000: return 1500000;
+#endif
+#ifdef B2000000
+        case B2000000: return 2000000;
+#endif
         default: return speed;
     }
 }
@@ -125,6 +164,27 @@ static void print_extended_info(int fd) {
         printf("Output Modes     : ");
         if (term.c_oflag & OPOST) printf("OPOST ");
         if (term.c_oflag & ONLCR) printf("ONLCR ");
+        printf("\n");
+
+        printf("Control Modes    : ");
+        if (term.c_cflag & PARENB)  printf("PARENB ");
+        if (term.c_cflag & PARODD)  printf("PARODD ");
+        if (term.c_cflag & CSTOPB)  printf("CSTOPB ");
+        if (term.c_cflag & CREAD)   printf("CREAD ");
+        if (term.c_cflag & HUPCL)   printf("HUPCL ");
+        if (term.c_cflag & CLOCAL)  printf("CLOCAL ");
+#ifdef CRTSCTS
+        if (term.c_cflag & CRTSCTS) printf("CRTSCTS ");
+#endif
+        printf("\n");
+
+        printf("Special Chars    :");
+        if (term.c_cc[VINTR]  < 32) printf(" INTR=^%c",  'A' + term.c_cc[VINTR]  - 1);
+        if (term.c_cc[VQUIT]  < 32) printf(" QUIT=^%c",  'A' + term.c_cc[VQUIT]  - 1);
+        if (term.c_cc[VERASE] < 32) printf(" ERASE=^%c", 'A' + term.c_cc[VERASE] - 1);
+        if (term.c_cc[VKILL]  < 32) printf(" KILL=^%c",  'A' + term.c_cc[VKILL]  - 1);
+        if (term.c_cc[VEOF]   < 32) printf(" EOF=^%c",   'A' + term.c_cc[VEOF]   - 1);
+        if (term.c_cc[VSUSP]  < 32) printf(" SUSP=^%c",  'A' + term.c_cc[VSUSP]  - 1);
         printf("\n");
     }
 
@@ -213,7 +273,11 @@ static int run_pty(const char *cmd) {
         exit(1);
     }
 
-    /* Parent process */
+    /* Parent process: register resize handler and enter raw mode */
+    g_master_fd = master_fd;
+    signal(SIGWINCH, sigwinch_handler);
+    /* Propagate current window size immediately */
+    sigwinch_handler(0);
     if (isatty(STDIN_FILENO)) {
         set_raw_mode();
     }

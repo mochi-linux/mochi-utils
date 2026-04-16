@@ -4,6 +4,7 @@ LDFLAGS ?=
 PREFIX ?= /usr
 DESTDIR ?=
 BINDIR ?= $(PREFIX)/bin
+SBINDIR ?= $(PREFIX)/sbin
 
 TARGET = tty
 SRCS = tty.c
@@ -24,4 +25,7 @@ install: $(TARGET)
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
-.PHONY: all clean install
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
+
+.PHONY: all clean install uninstall

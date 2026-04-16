@@ -2,6 +2,7 @@ CC ?= gcc
 CFLAGS ?= -Wall -Wextra -O2
 LDFLAGS ?=
 DESTDIR ?=
+SBINDIR ?= /usr/sbin
 
 SYSDAEMON_DIR = /System/Library/CoreServices/SystemDaemon
 SERVICES_DIR = /System/Library/CoreServices/Services
@@ -28,4 +29,7 @@ install: $(TARGET)
 	install -d $(DESTDIR)$(STARTUP_DIR)
 	install -m 755 $(TARGET) $(DESTDIR)$(SYSDAEMON_DIR)/$(TARGET)
 
-.PHONY: all clean install
+uninstall:
+	rm -f $(DESTDIR)$(SYSDAEMON_DIR)/$(TARGET)
+
+.PHONY: all clean install uninstall

@@ -19,14 +19,32 @@ int passwd_main(int argc, char **argv) {
         username = argv[1];
     }
 
-    // Check if user exists
+    /* Check if user exists */
     if (getpwnam(username) == NULL) {
         fprintf(stderr, "User '%s' not found.\n", username);
         return 1;
     }
 
+    /* Non-root users must prove their current password before changing it */
+    if (getuid() != 0) {
+        char *current = getpass("Current password: ");
+        if (!current) return 1;
+        int result = accman_verify_password(username, current);
+        if (result != 1) {
+            fprintf(stderr, "Authentication failure.\n");
+            return 1;
+        }
+    }
+
     char *pass = getpass("New password: ");
     if (!pass) return 1;
+
+    /* Enforce a minimum password length */
+    if (strlen(pass) < 6) {
+        fprintf(stderr, "Password must be at least 6 characters.\n");
+        return 1;
+    }
+
     char *pass_confirm = getpass("Retype new password: ");
     if (!pass_confirm || strcmp(pass, pass_confirm) != 0) {
         fprintf(stderr, "Passwords do not match.\n");

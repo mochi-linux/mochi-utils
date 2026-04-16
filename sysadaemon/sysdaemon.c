@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
@@ -145,6 +146,18 @@ void mount_essential_fs() {
     }
 }
 
+static int is_valid_hostname(const char *h) {
+    size_t len = strlen(h);
+    if (len == 0 || len > 253) return 0;
+    /* Allow alphanumeric, hyphen, and dot; must not start/end with hyphen */
+    if (h[0] == '-' || h[len - 1] == '-') return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!isalnum((unsigned char)h[i]) && h[i] != '-' && h[i] != '.')
+            return 0;
+    }
+    return 1;
+}
+
 void set_system_hostname() {
     section("system config");
     FILE *f = fopen(HOSTNAME_FILE, "r");
@@ -153,13 +166,21 @@ void set_system_hostname() {
         if (fgets(hostname, sizeof(hostname), f)) {
             hostname[strcspn(hostname, "\r\n")] = 0;
             if (strlen(hostname) > 0) {
-                animate_start("hostname");
-                if (sethostname(hostname, strlen(hostname)) == 0) {
+                if (!is_valid_hostname(hostname)) {
                     char msg[512];
-                    snprintf(msg, sizeof(msg), "hostname set to %s%s%s%s", COLOR_PINK, COLOR_BOLD, hostname, COLOR_RESET);
-                    line_ok(msg);
+                    snprintf(msg, sizeof(msg), "invalid hostname '%s%s%s' in /etc/hostname",
+                             COLOR_CORAL, hostname, COLOR_RESET);
+                    line_warn(msg);
                 } else {
-                    line_fail("failed to set hostname");
+                    animate_start("hostname");
+                    if (sethostname(hostname, strlen(hostname)) == 0) {
+                        char msg[512];
+                        snprintf(msg, sizeof(msg), "hostname set to %s%s%s%s",
+                                 COLOR_PINK, COLOR_BOLD, hostname, COLOR_RESET);
+                        line_ok(msg);
+                    } else {
+                        line_fail("failed to set hostname");
+                    }
                 }
             }
         }
@@ -182,10 +203,22 @@ void load_modules() {
         line[strcspn(line, "\r\n")] = 0;
         if (strlen(line) == 0 || line[0] == '#') continue;
 
+        /* Split "<modname> [args...]" on the first space */
+        char *args = strchr(line, ' ');
+        if (args) {
+            *args = '\0';
+            args++;
+            while (*args == ' ') args++; /* trim leading spaces */
+            if (*args == '\0') args = NULL;
+        }
+
         animate_start(line);
         pid_t pid = fork();
         if (pid == 0) {
-            execlp("modprobe", "modprobe", line, NULL);
+            if (args && *args)
+                execlp("modprobe", "modprobe", line, args, NULL);
+            else
+                execlp("modprobe", "modprobe", line, NULL);
             exit(1);
         } else if (pid > 0) {
             int status;
@@ -217,12 +250,20 @@ void start_service(const char *service_name) {
 
     char line[1024];
     char *exec_cmd = NULL;
+    char description[256] = {0};
+    char type[64]         = "simple";
 
     while (fgets(line, sizeof(line), f)) {
         if (strncmp(line, "ExecStart=", 10) == 0) {
+            free(exec_cmd);
             exec_cmd = strdup(line + 10);
             exec_cmd[strcspn(exec_cmd, "\r\n")] = 0;
-            break;
+        } else if (strncmp(line, "Description=", 12) == 0) {
+            snprintf(description, sizeof(description), "%.255s", line + 12);
+            description[strcspn(description, "\r\n")] = 0;
+        } else if (strncmp(line, "Type=", 5) == 0) {
+            snprintf(type, sizeof(type), "%.63s", line + 5);
+            type[strcspn(type, "\r\n")] = 0;
         }
     }
     fclose(f);
@@ -234,7 +275,11 @@ void start_service(const char *service_name) {
         return;
     }
 
-    animate_start(service_name);
+    /* Use Description= as the display label if provided */
+    const char *label = (description[0] != '\0') ? description : service_name;
+    animate_start(label);
+
+    int is_oneshot = (strcmp(type, "oneshot") == 0);
 
     pid_t pid = fork();
     if (pid == 0) {
@@ -247,8 +292,21 @@ void start_service(const char *service_name) {
         line_fail(msg);
     } else {
         char msg[512];
-        snprintf(msg, sizeof(msg), "%s%s%s service started", COLOR_MINT, service_name, COLOR_RESET);
-        line_ok(msg);
+        if (is_oneshot) {
+            /* Wait for oneshot services to complete */
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                snprintf(msg, sizeof(msg), "%s%s%s finished", COLOR_MINT, label, COLOR_RESET);
+                line_ok(msg);
+            } else {
+                snprintf(msg, sizeof(msg), "%s%s%s exited with error", COLOR_CORAL, label, COLOR_RESET);
+                line_fail(msg);
+            }
+        } else {
+            snprintf(msg, sizeof(msg), "%s%s%s started", COLOR_MINT, label, COLOR_RESET);
+            line_ok(msg);
+        }
     }
 
     free(exec_cmd);
@@ -284,10 +342,10 @@ void spawn_shell() {
     if (shell_pid == 0) {
         /* Set up the terminal for the interactive shell */
         setsid();
-        
+
         int fd = open("/dev/console", O_RDWR);
         if (fd < 0) fd = open("/dev/tty1", O_RDWR);
-        
+
         if (fd >= 0) {
             ioctl(fd, TIOCSCTTY, 1);
             dup2(fd, 0);
@@ -295,16 +353,22 @@ void spawn_shell() {
             dup2(fd, 2);
             if (fd > 2) close(fd);
         }
-        
-        setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);
-        setenv("TERM", "xterm-256color", 1);
-        setenv("USER", "root", 1);
-        setenv("HOME", "/root", 1);
-        
-        /* Launch bash as a login shell so it processes /etc/profile (and prints MOTD) */
+
+        setenv("PATH",    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);
+        setenv("TERM",    "xterm-256color", 1);
+        setenv("USER",    "root", 1);
+        setenv("LOGNAME", "root", 1);
+        setenv("HOME",    "/root", 1);
+        setenv("SHLVL",   "1", 1);
+
+        chdir("/root");
+        umask(022);
+
+        /* Prefer the login binary so /etc/profile and MOTD are processed */
+        execl("/bin/login", "login", "-f", "root", NULL);
+        /* Fall through to shells if login is unavailable */
         execl("/bin/bash", "-bash", NULL);
-        /* Fallback to generic sh if bash is unavailable */
-        execl("/bin/sh", "-sh", NULL);
+        execl("/bin/sh",   "-sh",   NULL);
         exit(1);
     }
 }

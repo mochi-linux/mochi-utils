@@ -4,6 +4,7 @@ LDFLAGS ?=
 PREFIX ?= /usr
 DESTDIR ?=
 BINDIR ?= $(PREFIX)/bin
+SBINDIR ?= $(PREFIX)/sbin
 
 SRCS = src/adminctl.c src/adduser.c src/passwd.c src/login.c src/sha256.c src/accman.c
 OBJS = $(SRCS:.c=.o)
@@ -27,4 +28,10 @@ install: $(TARGET)
 	ln -sf $(TARGET) $(DESTDIR)$(BINDIR)/passwd
 	ln -sf $(TARGET) $(DESTDIR)$(BINDIR)/login
 
-.PHONY: all clean install
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
+	rm -f $(DESTDIR)$(BINDIR)/adduser
+	rm -f $(DESTDIR)$(BINDIR)/passwd
+	rm -f $(DESTDIR)$(BINDIR)/login
+
+.PHONY: all clean install uninstall

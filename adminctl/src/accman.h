@@ -9,11 +9,13 @@
 #define ACCT_FILE_PATH "/System/Library/Security/AccountManager/ACCT"
 
 #define MAX_USERNAME_LEN 32
-#define HASH_LEN 32 /* SHA-256 produces a 32-byte hash */
+#define HASH_LEN 32  /* SHA-256 produces a 32-byte hash */
+#define SALT_LEN 16  /* 128-bit random salt per user record */
 
 /* Structure representing a single user record in the ACCT binary file */
 typedef struct {
-    char username[MAX_USERNAME_LEN];
+    char    username[MAX_USERNAME_LEN];
+    uint8_t salt[SALT_LEN];
     uint8_t password_hash[HASH_LEN];
 } AcctRecord;
 
@@ -36,5 +38,18 @@ int accman_set_password(const char *username, const char *password);
  * Returns 1 if valid, 0 if invalid, -1 on error (e.g., user not found).
  */
 int accman_verify_password(const char *username, const char *password);
+
+/**
+ * Deletes the account record for the given user.
+ * Rewrites the ACCT file omitting that record.
+ * Returns 0 on success, -1 if the user was not found or on I/O error.
+ */
+int accman_delete_user(const char *username);
+
+/**
+ * Checks whether a user account exists in the ACCT store.
+ * Returns 1 if found, 0 if not found.
+ */
+int accman_user_exists(const char *username);
 
 #endif /* ACCMAN_H */
